@@ -1,26 +1,31 @@
 # Ultralytics YOLOv5 🚀, AGPL-3.0 license
 """Common modules."""
+'''
+网络搭建常见的通用模块
+'''
+'''======================1.导入安装好的python库====================='''
+import json  # 用于json和Python数据之间的相互转换
+import math  # 数学函数模块
+import platform  # 获取操作系统的信息
+import warnings  # 警告程序员关于语言或库功能的变化的方法
+from copy import copy  # 数据拷贝模块 分浅拷贝和深拷贝
+from pathlib import Path  # Path将str转换为Path对象 使字符串路径易于操作的模块
+
+import cv2  # 调用OpenCV的cv库
+import numpy as np  # numpy数组操作模块
+import pandas as pd  # panda数组操作模块
+import requests  # Python的HTTP客户端库
+import torch  # pytorch深度学习框架
+import torch.nn as nn  # 专门为神经网络设计的模块化接口
+from PIL import Image  # 图像基础操作模块
+from torch.cuda import amp  # 混合精度训练模块
 
 import ast
 import contextlib
-import json
-import math
-import platform
-import warnings
 import zipfile
 from collections import OrderedDict, namedtuple
-from copy import copy
-from pathlib import Path
 from urllib.parse import urlparse
 
-import cv2
-import numpy as np
-import pandas as pd
-import requests
-import torch
-import torch.nn as nn
-from PIL import Image
-from torch.cuda import amp
 
 # Import 'ultralytics' package or install if missing
 try:
@@ -33,10 +38,13 @@ except (ImportError, AssertionError):
     os.system("pip install -U ultralytics")
     import ultralytics
 
+'''===================2.加载自定义模块============================'''
 from ultralytics.utils.plotting import Annotator, colors, save_one_box
 
 from utils import TryExcept
+# 加载数据集的函数
 from utils.dataloaders import exif_transpose, letterbox
+# 定义了一些常用的工具函数
 from utils.general import (
     LOGGER,
     ROOT,
@@ -56,7 +64,9 @@ from utils.general import (
 )
 from utils.torch_utils import copy_attr, smart_inference_mode
 
-
+'''===========1.autopad：根据输入的卷积核计算该卷积模块所需的pad值================'''
+# 为same卷积或者same池化自动扩充
+# 通过卷积核的大小来计算需要的padding为多少才能把tensor补成原来的形状
 def autopad(k, p=None, d=1):
     """
     Pads kernel to 'same' output shape, adjusting for optional dilation; returns padding size.
@@ -65,31 +75,52 @@ def autopad(k, p=None, d=1):
     """
     if d > 1:
         k = d * (k - 1) + 1 if isinstance(k, int) else [d * (x - 1) + 1 for x in k]  # actual kernel-size
+    # 如果p是none 则进行下一步
     if p is None:
         p = k // 2 if isinstance(k, int) else [x // 2 for x in k]  # auto-pad
     return p
 
-
+'''===========2.Conv：标准卷积 由Conv + BN + activate组成================'''
 class Conv(nn.Module):
     # Standard convolution with args(ch_in, ch_out, kernel, stride, padding, groups, dilation, activation)
     default_act = nn.SiLU()  # default activation
 
+    # init初始化构造函数
     def __init__(self, c1, c2, k=1, s=1, p=None, g=1, d=1, act=True):
+        """在Focus、Bottleneck、BottleneckCSP、C3、SPP、DWConv、TransformerBloc等模块中调用
+                Standard convolution  conv+BN+act
+                :params c1: 输入的channel值
+                :params c2: 输出的channel值
+                :params k: 卷积的kernel_size
+                :params s: 卷积的stride
+                :params p: 卷积的padding  一般是None  可以通过autopad自行计算需要pad的padding数
+                :params g: 卷积的groups数  =1就是普通的卷积  >1就是深度可分离卷积
+                :params act: 激活函数类型   True就是SiLU()/Swish   False就是不使用激活函数
+                             类型是nn.Module就使用传进来的激活函数类型
+        """
         """Initializes a standard convolution layer with optional batch normalization and activation."""
         super().__init__()
+        # 卷积层
         self.conv = nn.Conv2d(c1, c2, k, s, autopad(k, p, d), groups=g, dilation=d, bias=False)
+        # 归一化层
         self.bn = nn.BatchNorm2d(c2)
+        # 激活函数
         self.act = self.default_act if act is True else act if isinstance(act, nn.Module) else nn.Identity()
 
+    # 正向计算，网络执行的顺序是根据forward函数来决定的
     def forward(self, x):
         """Applies a convolution followed by batch normalization and an activation function to the input tensor `x`."""
+        # conv卷积 -> bn -> act激活
         return self.act(self.bn(self.conv(x)))
 
+    # 正向融合计算
     def forward_fuse(self, x):
         """Applies a fused convolution and activation function to the input tensor `x`."""
+        # 这里只有卷积和激活
         return self.act(self.conv(x))
 
-
+'''===========3.DWConv：深度可分离卷积================'''
+# 是GCONV的极端情况，深度分离(DepthWise)卷积层
 class DWConv(Conv):
     # Depth-wise convolution
     def __init__(self, c1, c2, k=1, s=1, d=1, act=True):
@@ -107,9 +138,13 @@ class DWConvTranspose2d(nn.ConvTranspose2d):
         """
         super().__init__(c1, c2, k, s, p1, p2, groups=math.gcd(c1, c2))
 
-
+'''===============================================三、注意力模块==================================================='''
 class TransformerLayer(nn.Module):
     # Transformer layer https://arxiv.org/abs/2010.11929 (LayerNorm layers removed for better performance)
+    """
+       Transformer layer https://arxiv.org/abs/2010.11929 (LayerNorm layers removed for better performance)
+       这部分相当于原论文中的单个Encoder部分(只移除了两个Norm部分, 其他结构和原文中的Encoding一模一样)
+      """
     def __init__(self, c, num_heads):
         """
         Initializes a transformer layer, sans LayerNorm for performance, with multihead attention and linear layers.
@@ -120,13 +155,18 @@ class TransformerLayer(nn.Module):
         self.q = nn.Linear(c, c, bias=False)
         self.k = nn.Linear(c, c, bias=False)
         self.v = nn.Linear(c, c, bias=False)
+        # 输入: query、key、value
+        # 输出: 0 attn_output 即通过self-attention之后，从每一个词语位置输出来的attention 和输入的query它们形状一样的
+        #      1 attn_output_weights 即attention weights 每一个单词和任意另一个单词之间都会产生一个weight
         self.ma = nn.MultiheadAttention(embed_dim=c, num_heads=num_heads)
         self.fc1 = nn.Linear(c, c, bias=False)
         self.fc2 = nn.Linear(c, c, bias=False)
 
     def forward(self, x):
         """Performs forward pass using MultiheadAttention and two linear transformations with residual connections."""
+        # 多头注意力机制 + 残差(这里移除了LayerNorm for better performance)
         x = self.ma(self.q(x), self.k(x), self.v(x))[0] + x
+        # feed forward 前馈神经网络 + 残差(这里移除了LayerNorm for better performance)
         x = self.fc2(self.fc1(x)) + x
         return x
 
@@ -155,17 +195,28 @@ class TransformerBlock(nn.Module):
         p = x.flatten(2).permute(2, 0, 1)
         return self.tr(p + self.linear(p)).permute(1, 2, 0).reshape(b, self.c2, w, h)
 
-
+'''===========4.Bottleneck：标准的瓶颈层 由1x1conv+3x3conv+残差块组成================'''
 class Bottleneck(nn.Module):
     # Standard bottleneck
     def __init__(self, c1, c2, shortcut=True, g=1, e=0.5):
         """Initializes a standard bottleneck layer with optional shortcut and group convolution, supporting channel
         expansion.
         """
+        """在BottleneckCSP和yolo.py的parse_model中调用
+          Standard bottleneck  Conv+Conv+shortcut
+          :params c1: 第一个卷积的输入channel
+          :params c2: 第二个卷积的输出channel
+          :params shortcut: bool 是否有shortcut连接 默认是True
+          :params g: 卷积分组的个数  =1就是普通卷积  >1就是深度可分离卷积
+          :params e: expansion ratio  e*c2就是第一个卷积的输出channel=第二个卷积的输入channel
+        """
         super().__init__()
         c_ = int(c2 * e)  # hidden channels
+        # 1*1卷积层
         self.cv1 = Conv(c1, c_, 1, 1)
+        # 3*3卷积层
         self.cv2 = Conv(c_, c2, 3, 1, g=g)
+        # 如果shortcut为True就会将输入和输出相加之后再输出
         self.add = shortcut and c1 == c2
 
     def forward(self, x):
@@ -174,29 +225,51 @@ class Bottleneck(nn.Module):
         """
         return x + self.cv2(self.cv1(x)) if self.add else self.cv2(self.cv1(x))
 
-
+'''===========5.BottleneckCSP：瓶颈层 由几个Bottleneck模块的堆叠+CSP结构组成================'''
 class BottleneckCSP(nn.Module):
     # CSP Bottleneck https://github.com/WongKinYiu/CrossStagePartialNetworks
     def __init__(self, c1, c2, n=1, shortcut=True, g=1, e=0.5):
         """Initializes CSP bottleneck with optional shortcuts; args: ch_in, ch_out, number of repeats, shortcut bool,
         groups, expansion.
         """
+        """在C3模块和yolo.py的parse_model模块调用
+        CSP Bottleneck https://github.com/WongKinYiu/CrossStagePartialNetworks
+        :params c1: 整个BottleneckCSP的输入channel
+        :params c2: 整个BottleneckCSP的输出channel
+        :params n: 有n个Bottleneck
+        :params shortcut: bool Bottleneck中是否有shortcut，默认True
+        :params g: Bottleneck中的3x3卷积类型  =1普通卷积  >1深度可分离卷积
+        :params e: expansion ratio c2xe=中间其他所有层的卷积核个数/中间所有层的输入输出channel数
+        c_: bottleneckCSP 结构的中间层的通道数，由膨胀率e决定
+        """
         super().__init__()
         c_ = int(c2 * e)  # hidden channels
+        # 4个1*1卷积层的堆叠
         self.cv1 = Conv(c1, c_, 1, 1)
         self.cv2 = nn.Conv2d(c1, c_, 1, 1, bias=False)
         self.cv3 = nn.Conv2d(c_, c_, 1, 1, bias=False)
         self.cv4 = Conv(2 * c_, c2, 1, 1)
+        # bn层
         self.bn = nn.BatchNorm2d(2 * c_)  # applied to cat(cv2, cv3)
+        # 激活函数
         self.act = nn.SiLU()
+        # m：叠加n次Bottleneck的操作
+        # 操作符*可以把一个list拆开成一个个独立的元素
         self.m = nn.Sequential(*(Bottleneck(c_, c_, shortcut, g, e=1.0) for _ in range(n)))
 
     def forward(self, x):
         """Performs forward pass by applying layers, activation, and concatenation on input x, returning feature-
         enhanced output.
         """
+        # y1相当于先做一次cv1操作然后进行m操作最后进行cv3操作，也就是BCSPn模块中的上面的分支操作
+        # 输入x ->Conv模块 ->n个bottleneck模块 ->Conv模块 ->y1
         y1 = self.cv3(self.m(self.cv1(x)))
+        # y2就是进行cv2操作，也就是BCSPn模块中的下面的分支操作（直接逆行conv操作的分支， Conv--nXBottleneck--conv）
+        # 输入x -> Conv模块 -> 输出y2
         y2 = self.cv2(x)
+        # 最后y1和y2做拼接， 接着进入bn层做归一化， 然后做act激活， 最后输出cv4
+        # 输入y1,y2->按照通道数融合 ->归一化 -> 激活函数 -> Conv输出 -> 输出
+        # torch.cat(y1, y2), dim=1: 这里是指定在第一个维度上进行合并，即在channel维度上合并
         return self.cv4(self.act(self.bn(torch.cat((y1, y2), 1))))
 
 
@@ -219,15 +292,25 @@ class CrossConv(nn.Module):
         """Performs feature sampling, expanding, and applies shortcut if channels match; expects `x` input tensor."""
         return x + self.cv2(self.cv1(x)) if self.add else self.cv2(self.cv1(x))
 
-
+'''===========6.C3：和BottleneckCSP模块类似，但是少了一个Conv模块================'''
 class C3(nn.Module):
     # CSP Bottleneck with 3 convolutions
     def __init__(self, c1, c2, n=1, shortcut=True, g=1, e=0.5):
         """Initializes C3 module with options for channel count, bottleneck repetition, shortcut usage, group
         convolutions, and expansion.
         """
+        """在C3TR模块和yolo.py的parse_model模块调用
+         CSP Bottleneck with 3 convolutions
+         :params c1: 整个BottleneckCSP的输入channel
+         :params c2: 整个BottleneckCSP的输出channel
+         :params n: 有n个Bottleneck
+         :params shortcut: bool Bottleneck中是否有shortcut，默认True
+         :params g: Bottleneck中的3x3卷积类型  =1普通卷积  >1深度可分离卷积
+         :params e: expansion ratio c2xe=中间其他所有层的卷积核个数/中间所有层的输入输出channel数
+         """
         super().__init__()
         c_ = int(c2 * e)  # hidden channels
+        # 3个1*1卷积层的堆叠，比BottleneckCSP少一个
         self.cv1 = Conv(c1, c_, 1, 1)
         self.cv2 = Conv(c1, c_, 1, 1)
         self.cv3 = Conv(2 * c_, c2, 1)  # optional act=FReLU(c2)
@@ -235,11 +318,13 @@ class C3(nn.Module):
 
     def forward(self, x):
         """Performs forward propagation using concatenated outputs from two convolutions and a Bottleneck sequence."""
+        # 将第一个卷积层与第二个卷积层的结果拼接在一起
         return self.cv3(torch.cat((self.m(self.cv1(x)), self.cv2(x)), 1))
 
 
 class C3x(C3):
     # C3 module with cross-convolutions
+    # ===6.2 C3SPP(C3)：继承自 C3，n 个 Bottleneck 更换为 1 个 SPP=== #
     def __init__(self, c1, c2, n=1, shortcut=True, g=1, e=0.5):
         """Initializes C3x module with cross-convolutions, extending C3 with customizable channel dimensions, groups,
         and expansion.
@@ -248,18 +333,30 @@ class C3x(C3):
         c_ = int(c2 * e)
         self.m = nn.Sequential(*(CrossConv(c_, c_, 3, 1, g, 1.0, shortcut) for _ in range(n)))
 
-
+'''===============================================五、模型扩展模块==================================================='''
+'''===========1.C3TR(C3)：继承自 C3，n 个 Bottleneck 更换为 1 个 TransformerBlock ================'''
 class C3TR(C3):
     # C3 module with TransformerBlock()
+    """
+    这部分是根据上面的C3结构改编而来的, 将原先的Bottleneck替换为调用TransformerBlock模块
+    """
     def __init__(self, c1, c2, n=1, shortcut=True, g=1, e=0.5):
         """Initializes C3 module with TransformerBlock for enhanced feature extraction, accepts channel sizes, shortcut
         config, group, and expansion.
         """
+        ''' 在C3RT模块和yolo.py的parse_model函数中被调用
+        :params c1: 整个C3的输入channel
+        :params c2: 整个C3的输出channel
+        :params n: 有n个子模块[Bottleneck/CrossConv]
+        :params shortcut: bool值，子模块[Bottlenec/CrossConv]中是否有shortcut，默认True
+        :params g: 子模块[Bottlenec/CrossConv]中的3x3卷积类型，=1普通卷积，>1深度可分离卷积
+        :params e: expansion ratio，e*c2=中间其它所有层的卷积核个数=中间所有层的的输入输出channel
+        '''
         super().__init__(c1, c2, n, shortcut, g, e)
         c_ = int(c2 * e)
         self.m = TransformerBlock(c_, c_, 4, n)
 
-
+# ===6.2 C3SPP(C3)：继承自 C3，n 个 Bottleneck 更换为 1 个 SPP=== #
 class C3SPP(C3):
     # C3 module with SPP()
     def __init__(self, c1, c2, k=(5, 9, 13), n=1, shortcut=True, g=1, e=0.5):
@@ -270,7 +367,7 @@ class C3SPP(C3):
         c_ = int(c2 * e)
         self.m = SPP(c_, c_, k)
 
-
+# ===6.3 C3Ghost(C3)：继承自 C3，Bottleneck 更换为 GhostBottleneck=== #
 class C3Ghost(C3):
     # C3 module with GhostBottleneck()
     def __init__(self, c1, c2, n=1, shortcut=True, g=1, e=0.5):
@@ -279,27 +376,41 @@ class C3Ghost(C3):
         c_ = int(c2 * e)  # hidden channels
         self.m = nn.Sequential(*(GhostBottleneck(c_, c_) for _ in range(n)))
 
-
+'''===========7.SPP：空间金字塔池化模块================'''
+# 用在骨干网络收尾阶段，用于融合多尺度特征。
+# ===7.1 SPP：空间金字塔池化=== #
 class SPP(nn.Module):
     # Spatial Pyramid Pooling (SPP) layer https://arxiv.org/abs/1406.4729
     def __init__(self, c1, c2, k=(5, 9, 13)):
         """Initializes SPP layer with Spatial Pyramid Pooling, ref: https://arxiv.org/abs/1406.4729, args: c1 (input channels), c2 (output channels), k (kernel sizes)."""
+        """在yolo.py的parse_model模块调用
+       空间金字塔池化 Spatial pyramid pooling layer used in YOLOv3-SPP
+       :params c1: SPP模块的输入channel
+       :params c2: SPP模块的输出channel
+       :params k: 保存着三个maxpool的卷积核大小 默认是(5, 9, 13)
+       """
         super().__init__()
         c_ = c1 // 2  # hidden channels
+        # 1*1卷积
         self.cv1 = Conv(c1, c_, 1, 1)
+        #  这里+1是因为有len(k)+1个输入
         self.cv2 = Conv(c_ * (len(k) + 1), c2, 1, 1)
+        # m先进行最大池化操作， 然后通过nn.ModuleList进行构造一个模块 在构造时对每一个k都要进行最大池化
         self.m = nn.ModuleList([nn.MaxPool2d(kernel_size=x, stride=1, padding=x // 2) for x in k])
 
     def forward(self, x):
         """Applies convolution and max pooling layers to the input tensor `x`, concatenates results, and returns output
         tensor.
         """
+        # 先进行cv1的操作
         x = self.cv1(x)
+        # 忽略了警告错误的输出
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")  # suppress torch 1.9.0 max_pool2d() warning
+            # 对每一个m进行最大池化 和没有做池化的每一个输入进行叠加  然后做拼接 最后做cv2操作
             return self.cv2(torch.cat([x] + [m(x) for m in self.m], 1))
 
-
+# ===7.2 SPPF：快速版的空间金字塔池化=== #
 class SPPF(nn.Module):
     # Spatial Pyramid Pooling - Fast (SPPF) layer for YOLOv5 by Glenn Jocher
     def __init__(self, c1, c2, k=5):
@@ -324,23 +435,42 @@ class SPPF(nn.Module):
             y2 = self.m(y1)
             return self.cv2(torch.cat((x, y1, y2, self.m(y2)), 1))
 
-
+'''===========8.Focus：把宽度w和高度h的信息整合到c空间================'''
 class Focus(nn.Module):
     # Focus wh information into c-space
     def __init__(self, c1, c2, k=1, s=1, p=None, g=1, act=True):
         """Initializes Focus module to concentrate width-height info into channel space with configurable convolution
         parameters.
         """
+        """在yolo.py的parse_model函数中被调用
+        理论：从高分辨率图像中，周期性的抽出像素点重构到低分辨率图像中，即将图像相邻的四个位置进行堆叠，
+            聚焦wh维度信息到c通道空，提高每个点感受野，并减少原始信息的丢失，该模块的设计主要是减少计算量加快速度。
+        Focus wh information into c-space 把宽度w和高度h的信息整合到c空间中
+        先做4个slice 再concat 最后再做Conv
+        slice后 (b,c1,w,h) -> 分成4个slice 每个slice(b,c1,w/2,h/2)
+        concat(dim=1)后 4个slice(b,c1,w/2,h/2)) -> (b,4c1,w/2,h/2)
+        conv后 (b,4c1,w/2,h/2) -> (b,c2,w/2,h/2)
+        :params c1: slice后的channel
+        :params c2: Focus最终输出的channel
+        :params k: 最后卷积的kernel
+        :params s: 最后卷积的stride
+        :params p: 最后卷积的padding
+        :params g: 最后卷积的分组情况  =1普通卷积  >1深度可分离卷积
+        :params act: bool激活函数类型  默认True:SiLU()/Swish  False:不用激活函数
+        """
         super().__init__()
+        # concat后的卷积（最后的卷积）
         self.conv = Conv(c1 * 4, c2, k, s, p, g, act=act)
         # self.contract = Contract(gain=2)
 
     def forward(self, x):
         """Processes input through Focus mechanism, reshaping (b,c,w,h) to (b,4c,w/2,h/2) then applies convolution."""
+        # 先进行切分， 然后进行拼接， 最后再做conv操作
         return self.conv(torch.cat((x[..., ::2, ::2], x[..., 1::2, ::2], x[..., ::2, 1::2], x[..., 1::2, 1::2]), 1))
         # return self.conv(self.contract(x))
 
-
+'''===============================================四、幻象模块==================================================='''
+'''===========1.GhostConv：幻象卷积  轻量化网络卷积模块================'''
 class GhostConv(nn.Module):
     # Ghost Convolution https://github.com/huawei-noah/ghostnet
     def __init__(self, c1, c2, k=1, s=1, g=1, act=True):
@@ -349,7 +479,9 @@ class GhostConv(nn.Module):
         """
         super().__init__()
         c_ = c2 // 2  # hidden channels
+        # 第一步卷积: 少量卷积, 一般是一半的计算量
         self.cv1 = Conv(c1, c_, k, s, None, g, act=act)
+        # 第二步卷积: cheap operations 使用3x3或5x5的卷积, 并且是逐个特征图的进行卷积（Depth-wise convolutional
         self.cv2 = Conv(c_, c_, 5, 1, None, c_, act=act)
 
     def forward(self, x):
@@ -357,7 +489,7 @@ class GhostConv(nn.Module):
         y = self.cv1(x)
         return torch.cat((y, self.cv2(y)), 1)
 
-
+'''===========2.GhostBottleneck：幻象瓶颈层 ================'''
 class GhostBottleneck(nn.Module):
     # Ghost Bottleneck https://github.com/huawei-noah/ghostnet
     def __init__(self, c1, c2, k=3, s=1):
@@ -369,6 +501,7 @@ class GhostBottleneck(nn.Module):
             DWConv(c_, c_, k, s, act=False) if s == 2 else nn.Identity(),  # dw
             GhostConv(c_, c2, 1, 1, act=False),
         )  # pw-linear
+        # 注意, 源码中并不是直接Identity连接, 而是先经过一个DWConv + Conv, 再进行shortcut连接的。
         self.shortcut = (
             nn.Sequential(DWConv(c1, c1, k, s, act=False), Conv(c1, c2, 1, 1, act=False)) if s == 2 else nn.Identity()
         )
@@ -377,9 +510,13 @@ class GhostBottleneck(nn.Module):
         """Processes input through conv and shortcut layers, returning their summed output."""
         return self.conv(x) + self.shortcut(x)
 
-
+'''===========9.Contract：收缩模块：调整张量的大小，将宽高收缩到通道中。================'''
 class Contract(nn.Module):
     # Contract width-height into channels, i.e. x(1,64,80,80) to x(1,256,40,40)
+    """用在yolo.py的parse_model模块 用的不多
+        改变输入特征的shape 将w和h维度(缩小)的数据收缩到channel维度上(放大)
+        Contract width-height into channels, i.e. x(1,64,80,80) to x(1,256,40,40)
+        """
     def __init__(self, gain=2):
         """Initializes a layer to contract spatial dimensions (width-height) into channels, e.g., input shape
         (1,64,80,80) to (1,256,40,40).
@@ -393,11 +530,13 @@ class Contract(nn.Module):
         """
         b, c, h, w = x.size()  # assert (h / s == 0) and (W / s == 0), 'Indivisible gain'
         s = self.gain
+        # permute: 改变tensor的维度顺序
         x = x.view(b, c, h // s, s, w // s, s)  # x(1,64,40,2,40,2)
+        # .view: 改变tensor的维度
         x = x.permute(0, 3, 5, 1, 2, 4).contiguous()  # x(1,2,2,64,40,40)
         return x.view(b, c * s * s, h // s, w // s)  # x(1,256,40,40)
 
-
+'''===========10.Expand：扩张模块，将特征图像素变大================'''
 class Expand(nn.Module):
     # Expand channels into width-height, i.e. x(1,64,80,80) to x(1,16,160,160)
     def __init__(self, gain=2):
@@ -420,7 +559,9 @@ class Expand(nn.Module):
         x = x.permute(0, 3, 4, 1, 5, 2).contiguous()  # x(1,16,80,2,80,2)
         return x.view(b, c // s**2, h * s, w * s)  # x(1,16,160,160)
 
-
+'''===========11.Concat：自定义concat模块，dimension就是维度值，说明沿着哪一个维度进行拼接================'''
+# 作拼接的一个类
+# 拼接函数，将两个tensor进行拼接
 class Concat(nn.Module):
     # Concatenate a list of tensors along dimension
     def __init__(self, dimension=1):
@@ -454,6 +595,7 @@ class DetectMultiBackend(nn.Module):
         from models.experimental import attempt_download, attempt_load  # scoped to avoid circular import
 
         super().__init__()
+        # 判断weights是否为list，若是取出第一个值作为传入路径
         w = str(weights[0] if isinstance(weights, list) else weights)
         pt, jit, onnx, xml, engine, coreml, saved_model, pb, tflite, edgetpu, tfjs, paddle, triton = self._model_type(w)
         fp16 &= pt or jit or onnx or engine or triton  # FP16
@@ -776,7 +918,7 @@ class DetectMultiBackend(nn.Module):
             return d["stride"], d["names"]  # assign stride, names
         return None, None
 
-
+'''===========2.AutoShape：自动调整shape,该类基本未用================'''
 class AutoShape(nn.Module):
     # YOLOv5 input-robust model wrapper for passing cv2/np/PIL/torch inputs. Includes preprocessing, inference and NMS
     conf = 0.25  # NMS confidence threshold
@@ -887,22 +1029,34 @@ class AutoShape(nn.Module):
 
             return Detections(ims, y, files, dt, self.names, x.shape)
 
-
+'''===========3.Detections：对推理结果进行处理================
+    这个模块吧，代码so长。是对推理结果进行一些处理，用的不是很多，
+    整个YOLOv5只在上面的AutoShape函数结尾调用了一下。不用仔细研究的，把yolo.py的Detect模块了解清楚既可~
+    '''
 class Detections:
     # YOLOv5 detections class for inference results
+    """用在AutoShape函数结尾"""
     def __init__(self, ims, pred, files, times=(0, 0, 0), names=None, shape=None):
         """Initializes the YOLOv5 Detections class with image info, predictions, filenames, timing and normalization."""
         super().__init__()
         d = pred[0].device  # device
         gn = [torch.tensor([*(im.shape[i] for i in [1, 0, 1, 0]), 1, 1], device=d) for im in ims]  # normalizations
+        # imgs：原图
         self.ims = ims  # list of images as numpy arrays
+        # pred：预测值(xyxy, conf, cls)
         self.pred = pred  # list of tensors pred[0] = (xyxy, conf, cls)
+        # names： 类名
         self.names = names  # class names
+        # files： 图像文件名
         self.files = files  # image filenames
         self.times = times  # profiling times
+        # xyxy：左上角+右下角格式
         self.xyxy = pred  # xyxy pixels
+        # xywh：中心点+宽长格式
         self.xywh = [xyxy2xywh(x) for x in pred]  # xywh pixels
+        # xyxyn：xyxy标准化
         self.xyxyn = [x / g for x, g in zip(self.xyxy, gn)]  # xyxy normalized
+        # xywhn：xywhn标准化
         self.xywhn = [x / g for x, g in zip(self.xywh, gn)]  # xywh normalized
         self.n = len(self.pred)  # number of images (batch size)
         self.t = tuple(x.t / self.n * 1e3 for x in times)  # timestamps (ms)
@@ -1060,7 +1214,7 @@ class Proto(nn.Module):
         """Performs a forward pass using convolutional layers and upsampling on input tensor `x`."""
         return self.cv3(self.cv2(self.upsample(self.cv1(x))))
 
-
+'''===========4.Classify：二级分类模块================'''
 class Classify(nn.Module):
     # YOLOv5 classification head, i.e. x(b,c1,20,20) to x(b,c2)
     def __init__(
@@ -1068,6 +1222,13 @@ class Classify(nn.Module):
     ):  # ch_in, ch_out, kernel, stride, padding, groups, dropout probability
         """Initializes YOLOv5 classification head with convolution, pooling, and dropout layers for input to output
         channel transformation.
+        """
+        """
+        这是一个二级分类模块, 什么是二级分类模块? 比如做车牌的识别, 先识别出车牌, 如果想对车牌上的字进行识别, 就需要二级分类进一步检测.
+        如果对模型输出的分类再进行分类, 就可以用这个模块. 不过这里这个类写的比较简单, 若进行复杂的二级分类, 可以根据自己的实际任务可以改写, 这里代码不唯一.
+        Classification head, i.e. x(b,c1,20,20) to x(b,c2)
+        用于第二级分类   可以根据自己的任务自己改写，比较简单
+        比如车牌识别 检测到车牌之后还需要检测车牌在哪里，如果检测到侧拍后还想对车牌上的字再做识别的话就要进行二级分类
         """
         super().__init__()
         c_ = 1280  # efficientnet_b0 size
