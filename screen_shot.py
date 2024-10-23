@@ -10,16 +10,17 @@ import time
 # 根据句柄截图
 # 通过spy++工具，获取到句柄，这里需要将十六进制转为十进制
 # C:\Users\chenyuzhu\Desktop\网课YOLOv5原理与源码解析\个人学习笔记\spy++
-hwnd = int('002A07A4', 16)
+hwnd = int('00070720', 16)
 # 根据窗口句柄获取窗口位置和大小
 left, top, right, bottom = win32gui.GetWindowRect(hwnd)
 
-# 截取窗口图片
+# 截取指定程序窗口图片
 length = 1
+# 截取200张
 while length < 200:
     screenshot = pyautogui.screenshot(region=(left, top, right - left, bottom - top))
-    # 保存图片
-    # screenshot.save("screenshot/" + str(length) + ".jpg")
+    # 保存图片:打开下面注释即可
+    # screenshot.save("screenshot/detect/" + str(length) + ".jpg")
     length += 1
     time.sleep(0.2)
 
