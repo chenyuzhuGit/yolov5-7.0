@@ -1,8 +1,9 @@
 """
 截图工具
 """
-import pyautogui
 import time
+
+import pyautogui
 import win32gui
 
 # 截屏位置（左上角起始坐标点，右下角坐标点）
@@ -21,8 +22,9 @@ def screen_shot(path='screenshot/detect/', img_name='default', img_suffix='.jpg'
     # 截取指定程序窗口图片
     screen_shot_obj = pyautogui.screenshot(region=position_record)
     # 保存图片
-    img = screen_shot_obj.save(path + img_name + img_suffix)
-    return img
+    img_name = path + img_name + img_suffix
+    screen_shot_obj.save(img_name)
+    return img_name
 
 
 def get_shot_position(handle_number):
@@ -34,7 +36,7 @@ def get_shot_position(handle_number):
         2.因为截图位置基本上不会一直变化，所在单独拿出来，只执行一次就可以了
         3.后续循环调用直接循环screen_shot方法就可以了
     """
-    if handle_number is None:
+    if handle_number is None or handle_number == '':
         raise Exception("must have handle number")
 
     # 编号转码
@@ -49,16 +51,17 @@ def get_shot_position(handle_number):
 
 # 测试
 if __name__ == "__main__":
-    handleNumber = ''
+    handleNumber = '000302F8'
     # 获取截图位置
     get_shot_position(handleNumber)
 
+    # 起始数量
+    length = 0
     # 截图总数量
     total = 5
-    # 起始数量
-    length = 1
+
 
     while length < total:
-        screen_shot('screenshot/test/')
+        screen_shot('screenshot/test/', img_name=str(length))
         length += 1
         time.sleep(0.2)
