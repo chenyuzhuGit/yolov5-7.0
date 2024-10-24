@@ -100,59 +100,64 @@ from utils.general import (
 )
 # utils.torch_utils这个文件定义了一些与PyTorch有关的工具函数，比如选择设备、同步时间等等。
 from utils.torch_utils import select_device, smart_inference_mode
-import time
-from screenShot import get_shot_position,screen_shot
+from screenShot import get_shot_position, screen_shot
+from utils.local_utils import get_screen_shot_img_name
 
 # 是否暂停
 paused = False
 # 句柄编号
-handle_number = ''
+# handle_number = '00290630'
+handle_number = '000302F8'
 
 '''===================1.载入参数======================='''
+
+
 # smart_inference_mode：用于自动切换模型的推理模式，如果是FP16模型，则自动切换为FP16推理模式
 #    否则切换为FP32推理模式，这样可以避免模型推理时出现类型不匹配的错误
 @smart_inference_mode()
 def run(
-    weights=ROOT / "yolov5s.pt",  # model path or triton URL
-    source=ROOT / "data/images",  # file/dir/URL/glob/screen/0(webcam)
-    data=ROOT / "data/coco128.yaml",  # dataset.yaml path
-    imgsz=(640, 640),  # inference size (height, width)
-    conf_thres=0.25,  # confidence threshold
-    iou_thres=0.45,  # NMS IOU threshold
-    max_det=1000,  # maximum detections per image
-    device="",  # cuda device, i.e. 0 or 0,1,2,3 or cpu
-    view_img=False,  # show results
-    save_txt=False,  # save results to *.txt
-    save_csv=False,  # save results in CSV format
-    save_conf=False,  # save confidences in --save-txt labels
-    save_crop=False,  # save cropped prediction boxes
-    nosave=False,  # do not save images/videos
-    classes=None,  # filter by class: --class 0, or --class 0 2 3
-    agnostic_nms=False,  # class-agnostic NMS
-    augment=False,  # augmented inference
-    visualize=False,  # visualize features
-    update=False,  # update all models
-    project=ROOT / "runs/detect",  # save results to project/name
-    name="exp",  # save results to project/name
-    exist_ok=False,  # existing project/name ok, do not increment
-    line_thickness=3,  # bounding box thickness (pixels)
-    hide_labels=False,  # hide labels
-    hide_conf=False,  # hide confidences
-    half=False,  # use FP16 half-precision inference
-    dnn=False,  # use OpenCV DNN for ONNX inference
-    vid_stride=1,  # video frame-rate stride
+        weights=ROOT / "yolov5s.pt",  # model path or triton URL
+        source=ROOT / "data/images",  # file/dir/URL/glob/screen/0(webcam)
+        data=ROOT / "data/coco128.yaml",  # dataset.yaml path
+        imgsz=(640, 640),  # inference size (height, width)
+        conf_thres=0.25,  # confidence threshold
+        iou_thres=0.45,  # NMS IOU threshold
+        max_det=1000,  # maximum detections per image
+        device="",  # cuda device, i.e. 0 or 0,1,2,3 or cpu
+        view_img=False,  # show results
+        save_txt=False,  # save results to *.txt
+        save_csv=False,  # save results in CSV format
+        save_conf=False,  # save confidences in --save-txt labels
+        save_crop=False,  # save cropped prediction boxes
+        nosave=False,  # do not save images/videos
+        classes=None,  # filter by class: --class 0, or --class 0 2 3
+        agnostic_nms=False,  # class-agnostic NMS
+        augment=False,  # augmented inference
+        visualize=False,  # visualize features
+        update=False,  # update all models
+        project=ROOT / "runs/detect",  # save results to project/name
+        name="exp",  # save results to project/name
+        exist_ok=False,  # existing project/name ok, do not increment
+        line_thickness=3,  # bounding box thickness (pixels)
+        hide_labels=False,  # hide labels
+        hide_conf=False,  # hide confidences
+        half=False,  # use FP16 half-precision inference
+        dnn=False,  # use OpenCV DNN for ONNX inference
+        vid_stride=1,  # video frame-rate stride
 ):
     """
     主函数
     :return:
     """
-    #初始化截图位置
+    # 初始化截图位置
+    global handle_number
     get_shot_position(handle_number)
 
     # ---------------------初始化参数---------------------------------------------------------------------------
     # 将source转换为字符串， source为输入的图片，视频，摄像头等
-    # TODO 来源于截图
-    source = str(source)
+    # 来源于截图
+    # 其他内容：了解怎么衔接截图返回的图片流，直接转换为dataset(再去磁盘读取，浪费时间);答：暂时没有好的方案
+    source = screen_shot('data/images/realOperation/', img_name=get_screen_shot_img_name())
 
     # 判断是否保存图片，如果nosave为False，且source不是txt文件，则保存图片
     # TODO 保持默认值
@@ -228,8 +233,6 @@ def run(
         dataset = LoadScreenshots(source, img_size=imgsz, stride=stride, auto=pt)
     else:
         # 创建LoadImages()对象，直接加载图片，source为输入源，img_size为图像大小，stride为模型的stride，auto为是否自动选择设备，vid_stride为视频帧率
-        # TODO 了解怎么衔接截图返回的图片流，直接转换为dataset(再去磁盘读取，浪费时间)
-        img = screen_shot('screenshot/realOperation/')
         dataset = LoadImages(source, img_size=imgsz, stride=stride, auto=pt, vid_stride=vid_stride)
 
     # 初始化vid_path和vid_writer，vid_path为视频路径，vid_writer为视频写入对象
@@ -520,6 +523,8 @@ def run(
 
 
 '''=================三、Parse_opt()用来设置输入参数的子函数==============================='''
+
+
 def parse_opt():
     """
     初始化运行参数
@@ -530,7 +535,8 @@ def parse_opt():
     parser = argparse.ArgumentParser()
     # 以下配置有default-----------------------------
     # 训练的权重路径，可以使用自己训练的权重，也可以使用官网提供的权重。默认官网的权重
-    parser.add_argument("--weights", nargs="+", type=str, default=ROOT / "weights/new_dnf_01_best.pt", help="model path or triton URL")
+    parser.add_argument("--weights", nargs="+", type=str, default=ROOT / "weights/new_dnf_01_best.pt",
+                        help="model path or triton URL")
     # source 也可以是视频文件
     parser.add_argument("--source", type=str, default=ROOT / "data/images", help="file/dir/URL/glob/screen/0(webcam)")
     # 配置数据文件路径，包括image/label/classes等信息，训练自己的文件，需要作相应更改，可以不用管
@@ -599,7 +605,10 @@ def parse_opt():
     # 返回参数
     return opt
 
+
 '''=======================二、设置main函数==================================='''
+
+
 def main(opt):
     """
     主函数
@@ -611,10 +620,10 @@ def main(opt):
     check_requirements(ROOT / "requirements.txt", exclude=("tensorboard", "thop"))
     # 运行程序，vars()函数返回对象object的属性和属性值字典对象
     # 捕捉画面+目标检测+玩游戏
-    while True:
-        if not paused:
+    # while True:
+    #     if not paused:
             # TODO 考虑把while循环放到 run方法里
-            run(**vars(opt))
+    run(**vars(opt))
 
         # TODO
         # Setting pause and unpause
@@ -641,5 +650,5 @@ def main(opt):
 # 命令使用
 # python detect.py --weights best.pt --source  data/images/fishman.jpg # webcam
 if __name__ == "__main__":
-    opt = parse_opt() # 解析参数
-    main(opt) # 执行主函数
+    opt = parse_opt()  # 解析参数
+    main(opt)  # 执行主函数
