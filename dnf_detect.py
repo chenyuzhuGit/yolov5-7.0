@@ -144,9 +144,11 @@ def run(
     """
     # ---------------------初始化参数---------------------------------------------------------------------------
     # 将source转换为字符串， source为输入的图片，视频，摄像头等
+    # TODO 来源于截图
     source = str(source)
 
     # 判断是否保存图片，如果nosave为False，且source不是txt文件，则保存图片
+    # TODO 保持默认值
     save_img = not nosave and not source.endswith(".txt")  # save inference images
 
     # 判断source是不是视频/图像文件路径
@@ -159,6 +161,7 @@ def run(
 
     # 判断source是否是数字，source.endswith('.streams')判断source是否以.streams结尾，
     # (is_url and not is_file)判断source是否是url，且不是文件，上述三个条件有一个为True，则webcam为True。
+    # TODO 保持默认
     webcam = source.isnumeric() or source.endswith(".streams") or (is_url and not is_file)
 
     # 判断source是否是截图，如果是，则screenshot为True
@@ -176,10 +179,13 @@ def run(
     (save_dir / "labels" if save_txt else save_dir).mkdir(parents=True, exist_ok=True)  # make dir
 
     # Load model
-    '''=======================4.加载模型=========================='''
+    # TODO -------加载模型的抽取出来，只执行一次------开始----
+    # 初始化模型
     # 选择设备，如果device为空，则自动选择设备
+    # TODO 保持默认
     device = select_device(device)
     # 加载模型，DetectMultiBackend()函数用于加载模型，weights为模型路径，device为设备，dnn为是否使用opencv dnn，data为数据集，fp16为是否使用fp16推理
+    # TODO 保持默认
     model = DetectMultiBackend(weights, device=device, dnn=dnn, data=data, fp16=half)
     '''
         stride：推理时所用到的步长，默认为32， 大步长适合于大目标，小步长适合于小目标
@@ -193,6 +199,7 @@ def run(
     stride, names, pt = model.stride, model.names, model.pt
     # 验证图像大小是每个维度的stride=32的倍数,如果不能则调整为能被整除并返回
     imgsz = check_img_size(imgsz, s=stride)  # check image size
+    # TODO -------加载模型的抽取出来，只执行一次-----结束-----
 
     '''=======================5.加载数据========================'''
     # Dataloader
