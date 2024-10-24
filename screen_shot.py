@@ -1,55 +1,64 @@
-'''
+"""
 截图工具
-'''
-import win32gui
+"""
 import pyautogui
 import time
+import win32gui
 
-# 地下城的句柄为：000306EA
-
-# 根据句柄截图
-# 通过spy++工具，获取到句柄，这里需要将十六进制转为十进制
-# C:\Users\chenyuzhu\Desktop\网课YOLOv5原理与源码解析\个人学习笔记\spy++
-hwnd = int('00070720', 16)
-# 根据窗口句柄获取窗口位置和大小
-left, top, right, bottom = win32gui.GetWindowRect(hwnd)
-
-# 截取指定程序窗口图片
-length = 1
-# 截取200张
-while length < 200:
-    screenshot = pyautogui.screenshot(region=(left, top, right - left, bottom - top))
-    # 保存图片:打开下面注释即可
-    # screenshot.save("screenshot/detect/" + str(length) + ".jpg")
-    length += 1
-    time.sleep(0.2)
+# 截屏位置（左上角起始坐标点，右下角坐标点）
+position_record = None
 
 
-# 获取屏幕大小
-# screen_width, screen_height = pyautogui.size()
-# 获取窗口句柄的回调函数
-# def enum_windows_proc(hwnd, param):
-#     if param in win32gui.GetWindowText(hwnd):
-#         print(f'窗口句柄: {hwnd}')
+def screen_shot(path='screenshot/detect/', img_name='default', img_suffix='.jpg'):
+    """
+    截图
+    :param path:图片保存路径
+    :param img_name:图片名称
+    :param img_suffix:图片后缀
+    :return: 返回图片路径名称
+    """
+
+    # 截取指定程序窗口图片
+    screen_shot_obj = pyautogui.screenshot(region=position_record)
+    # 保存图片
+    img = screen_shot_obj.save(path + img_name + img_suffix)
+    return img
 
 
-# 要查找的窗口部分标题文本
-# window_title_part = "Anaconda"
+def get_shot_position(handle_number):
+    """
+    获取截屏位置，并存到position_record变量中
+    :param handle_number:句柄编号
+    备注：
+        1.先使用这个方法获取截图位置，并缓存在全局变量中
+        2.因为截图位置基本上不会一直变化，所在单独拿出来，只执行一次就可以了
+        3.后续循环调用直接循环screen_shot方法就可以了
+    """
+    if handle_number is None:
+        raise Exception("must have handle number")
 
-# 枚举所有窗口，查找包含指定文本的窗口
-# win32gui.EnumWindows(enum_windows_proc, window_title_part)
+    # 编号转码
+    hwnd = int(handle_number, 16)
 
-# 根据窗口标题获取窗口句柄
-# hwnd = win32gui.FindWindow(None, '地下城与勇士')
-# print(hwnd)
-# # 根据窗口类名获取窗口句柄
-# hwnd = win32gui.FindWindow('EdgeWindowClass', None)
-# print(hwnd)
-# # 获取当前活动窗口句柄
-# hwnd = win32gui.GetForegroundWindow()
-# print(hwnd)
+    global position_record
+    # 根据窗口句柄获取窗口位置和大小
+    position_record = win32gui.GetWindowRect(hwnd)
+    left, top, right, bottom = position_record
+    position_record = (left, top, right - left, bottom - top)
 
 
+# 测试
+if __name__ == "__main__":
+    handleNumber = ''
+    # 获取截图位置
+    get_shot_position(handleNumber)
 
-# strptime = datetime.strptime(time.localtime(), "%Y-%m-%dT%H:%M:%S.%fZ")
-# print()
+    # 截图总数量
+    total = 5
+    # 起始数量
+    length = 1
+
+    while length < total:
+        screen_shot('screenshot/test/')
+        length += 1
+        time.sleep(0.2)
