@@ -101,8 +101,12 @@ from utils.general import (
 # utils.torch_utils这个文件定义了一些与PyTorch有关的工具函数，比如选择设备、同步时间等等。
 from utils.torch_utils import select_device, smart_inference_mode
 import time
+from screenShot import get_shot_position,screen_shot
+
 # 是否暂停
 paused = False
+# 句柄编号
+handle_number = ''
 
 '''===================1.载入参数======================='''
 # smart_inference_mode：用于自动切换模型的推理模式，如果是FP16模型，则自动切换为FP16推理模式
@@ -142,6 +146,9 @@ def run(
     主函数
     :return:
     """
+    #初始化截图位置
+    get_shot_position(handle_number)
+
     # ---------------------初始化参数---------------------------------------------------------------------------
     # 将source转换为字符串， source为输入的图片，视频，摄像头等
     # TODO 来源于截图
@@ -221,6 +228,8 @@ def run(
         dataset = LoadScreenshots(source, img_size=imgsz, stride=stride, auto=pt)
     else:
         # 创建LoadImages()对象，直接加载图片，source为输入源，img_size为图像大小，stride为模型的stride，auto为是否自动选择设备，vid_stride为视频帧率
+        # TODO 了解怎么衔接截图返回的图片流，直接转换为dataset(再去磁盘读取，浪费时间)
+        img = screen_shot('screenshot/realOperation/')
         dataset = LoadImages(source, img_size=imgsz, stride=stride, auto=pt, vid_stride=vid_stride)
 
     # 初始化vid_path和vid_writer，vid_path为视频路径，vid_writer为视频写入对象
